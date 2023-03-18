@@ -1,0 +1,738 @@
+---
+title: "Mouse Neural Activity Analysis Final Project"
+author: "Mark Faynboym"
+date: '2023-03-11'
+output: 
+  html_document:
+    toc: true
+    code_folding: hide
+    theme: yeti
+    highlight: pygments
+    toc_float: true
+    df_print: paged
+    number_sections: yes
+---
+
+# GitHub link: https://github.com/markafaynboym/Mouse-Neural-Activity-Analysis-Final-Project/upload/main
+##
+```{r setup, include=FALSE, echo=FALSE, results='hide',message=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(lme4)
+library(ggplot2)
+library(dplyr)
+library(lmerTest)
+library(tidyverse)
+library(gplots)
+library("ggplot2")
+library("ggdendro")
+require(dendextend)
+require(colorspace)
+library(formattable)
+library(gtsummary)
+library(plotly)
+library(htmltools)
+library(hrbrthemes)
+library(ROCR)
+```
+
+```{r echo=FALSE, results='hide',message=FALSE}
+session=list()
+for(i in 1:5){
+  session[[i]]=readRDS(paste('/Users/markafaynboym/Downloads/session',i,'.rds',sep=''))
+}
+```
+
+# Abstract
+Accurate prediction of decision-making by the monitoring of neural activity by various stimuli is a very important concept. Steinbetz et. al. had aimed to solve such a challenge and had found that differences in visual contrasts resulted in giving more significant neural activity and decision making than when contrasts were roughly equal. What had been done in this report along with a general aggregating by neurons and time
+as well as by clustering to see how different types of neurons would behave differently. What we had come to see was that there were differences in neural activity as well as decision making, though the prediction model was not at a very desirable level. However, there was enough to inspire further research into the different types of neurons.
+
+# Introduction
+
+  The primary objective for us is to get a better insight into the neural activity of a mouse's visual cortex and how it is used in the prediction of the outcomes of the trial. More specifically there are two questions of interest. 
+1.The primary question of interest is how do the neurons in the visual cortex respond to the stimuli presented on the left and right? More specifically, we would like to know if the combination of left and right stimuli have additive effects on the neural responses or if there is some interaction of the two.
+2.The secondary question: Is it possible to predict the feedback of each trial depending on the stimuli presented? 
+  The main significant idea to draw from this project is the understanding of neural activity and predicting actions based of how certain variables effect neural activity. Furthermore, as mammals do not vary that much from each other, this can provide insight into how human beings' neural patterns are influenced and gain a method of prediction of human feedback. I would also like to add that the understanding and prediction of human beings is very powerful and though this project may not have serious consequences, it may lead to more complex projects that could. This must be used responsibly and morally, as concern of such information can be used for the wrong reasons.
+
+# Background
+We study the data given by the study titled [Distributed coding of choice, action and engagement across the mouse brain](https://www.nature.com/articles/s41586-019-1787-x) by Nicholas Steinmetz et. al. This article describes a study in which researchers investigated how different parts of the mouse brain encode information related to decision making, action and engagement.
+
+  In this article, Steinmetz et. al. recorded neural activity across the brain while mice performed a task. On each trial, visual stimuli of varying contrast could appear on the left, right both or neither sides of the mouse. Mice earned a water reward by turning a wheel with their paws to indicate which side had highest contrast. If neither stimulus was present, they earned a reward for making a third type of response, keeping the wheel still for 1.5 seconds,however this response will not be included in our trials as the trial length is only 0.4 seconds at most, though it is important for us to mention as it pertains to some of the data recorded. The feedback we will be observing will be a binary feedback of either left or right wheel turning. We also note that all mice were trained prior to the data recordings so they could get used to the method.
+
+  Some findings we will hope to confirm and explore further are that the choices were most accurate when stimuli appeared on a single side at high contrast. In low contrast the mice performed worse. I will not get into the biological terminology too much but there were observed differences in the reaction of different parts of the brain to the stimulus however there was also neuron firings following the wheel turn which can lead to an issue in noise. Also to note, when the mouse successfully selected a visual stimulus contralateral to the recorded hemisphere of the brain, the visual cortex neurons fired first.
+We will be looking into some of these findings as well as exploring others as we go through the analysis.
+
+  What the article showed was that different groups of neurons were active in different parts of the brain depending on the type of task being performed. Also, the activity of neurons was highly correlated with the behavior of the mice, indicating that patterns of neural activity were related to their feedback. 
+
+## Data Overview
+In total there were 39 sessions taken with 10 mice and recordings were taken from 30,000 neurons in 42 brain regions with 2-3 probes at a time to get recordings from different regions of the brain. In our subset of data we get 5 RDS files that contain 5 sessions  taken from two different mice, 'Cori', and 'Forssmann'. Each session contains the following:
+
+Five variables are available for each trial, namely 
+- `mouse_name`: Name of the mouse
+- `date_exp`: Date of the experiment
+- `feedback_type`: type of the feedback, 1 for success and -1 for failure for each trial in the session. The success is if the mouse spins the wheel in the correct direction in regards to the stimulus.
+Contrasts taken at levels 0,0.25,0.5 and 1
+- `contrast_left`: contrast of the left stimulus that was used for each trial in the session
+- `contrast_right`: contrast of the right stimulus that was used for each trial in the session
+- `time`: centers of the time bins for `spks`. Generally a 0.4 second time interval partitioned into 39 time segments of each trial in the session
+- `spks`: numbers of spikes of neurons in the visual cortex in time bins defined in `time`. In the form of a matrix of number of neurons by time partition (# of neurons x 39) of each trial in the session in which activity of neurons are recorded and made available in the form of spike trains.
+
+# Analysis Version 1: Aggregating by neurons, and time.
+
+## Descriptive Analysis
+
+### Table for number of trials and neurons per session
+This table summarizes our data by session
+```{r echo=FALSE}
+t=c(dim(session[[1]]$spks[[1]])[1],dim(session[[2]]$spks[[1]])[1],dim(session[[3]]$spks[[1]])[1],dim(session[[4]]$spks[[1]])[1],dim(session[[5]]$spks[[1]])[1])
+n=c(length(session[[1]]$spks),length(session[[2]]$spks),length(session[[3]]$spks),length(session[[4]]$spks),length(session[[5]]$spks))
+sumtable1=t(data.frame(t,n))
+colnames(sumtable1)=c("session 1:Cori","session 2:Cori","session 3:Cori","session 4:Forssmann","session 5:Forssmann")
+rownames(sumtable1)=c("Number of Trials", "Number of Neurons")
+knitr::kable(sumtable1, caption = 'Neuron and Trial distribution by Session')
+```
+
+When looking at the sample size of trials for each session, the concern comes up of whether we have an unbalanced or balanced data set. According to [this machine learning page](https://developers.google.com/machine-learning/data-prep/construct/sampling-splitting/imbalanced-data) we have a mildly imbalanced data set. Since this is a mild case, we will not be downsampling or upweighting the data however.
+We do notice much more unbalanced data in terms of neuron count per session and will be adjusting our methods accordingly.
+
+In terms of the count of neuron imbalance, we will deal with this issue further down in our analysis.It is safe to state that we are unbalanced in size when it comes to neuron count per session.
+
+### DataFrame (Collapse on neuron and time variables)
+
+We first look to make a general table where we collapse on neurons and time to get a general sense of what we are looking at and to see if there any inferences we can already make. We also want to have a sort of control to test against other types of dataframes we will be making. For example, we will be clustering later on and would like to see differences between overall neural activity and cluster activity.
+
+#### Data Assumptions
+The problem I would like to emphasize beforehand is that we will be making the following assumption:
+All neurons are treated equal as we are averaging by neuron firings. This is not correct as we know there are different types of neurons which are suspected to behave differently. Again, this is just a base dataframe off of which we will refine in the second analysis.
+
+All time points are treated equal as we are averaging by time interval.
+
+Contrast levels are treated as factors instead of a continuous variables. We are doing this because whether a contrast is 0.25 or 0.26 will probably not make much of a difference. However 0.25 vs 1.0 will most likely show an impact. Thus by keeping our data as factors we can still get the inferences we need however we can also apply functions that are geared more towards categorical data.
+
+The issues we avoid in aggregating our neurons is that we now do not need to worry about the different number of neurons per session.
+```{r echo=FALSE, results='hide',message=FALSE}
+session_dataframe= function(ID) {
+  t=0.4 # from Background 
+  n.trials=length(session[[ID]]$spks)  #number of neurons per session
+  n.neurons=dim(session[[ID]]$spks[[ID]])[1] #number of neurons per session
+  
+  # Obtain the firing rate 
+  firingrate=numeric(n.trials) 
+  for(i in 1:n.trials){
+    firingrate[i]=sum(session[[ID]]$spks[[i]])/n.neurons/t
+  }
+  
+  df=data.frame(rep(ID,n.trials),session[[ID]]$contrast_left,session[[ID]]$contrast_right,firingrate)
+  df
+  return(df)
+}
+```
+
+```{r echo=FALSE, results='hide',message=FALSE}
+create_dataframe = function(){
+  df=data.frame()
+  for (j in 1:length(session)){
+    new_df=session_dataframe(j)
+    df=rbind(df,new_df)
+  }
+  
+  colnames(df)=c("session", "contrast_left", "contrast_right", "firingrate")
+  return(df)
+}
+```
+
+```{r echo=FALSE, results='hide',message=FALSE}
+df=create_dataframe()
+df$contrast_left=as.factor(df$contrast_left)
+df$contrast_right=as.factor(df$contrast_right)
+df$session=as.factor(df$session)
+```
+
+#### Contrast dispersion table
+
+```{r echo=FALSE,message=FALSE}
+ctbl=matrix(xtabs(~contrast_left + contrast_right, data=df),nrow=4 ,ncol=4)
+colnames(ctbl)=c("R0.0","R0.25","R0.5","R1.0")
+rownames(ctbl)=c("L0.0","L0.25","L0.5","L1.0")
+
+knitr::kable(ctbl, caption = 'Dispersion Table by contrast Left(Rows), and Right(Column)')
+```
+This is the number of trials for each combination of left and right contrast. We notice that there are a lot of 0,0 combinations. This is probably because there is a different experiment being done on testing a 0,0 reaction of the mice for 1.5 seconds which is beyond the scope of this course. We will see this in histograms later on and consider removing some of the neurons that do not fire at all in our trials.
+**Note: This dispersion of left and right contrast are similar between session thus we will not waste space on showing each table.
+
+
+### Boxplot of overall sessions
+```{r echo=FALSE, results='hide',message=FALSE}
+#ggplot(data=df, mapping = aes(x=session, y=firingrate)) + 
+ #       geom_boxplot()+ xlab("sessions")
+boxplot(firingrate~session,
+data=df,
+main="Firerate vs Session",
+xlab="Session",
+ylab="Firingrate"
+#,col="orange",
+#border="brown"
+)
+```
+Observations:Boxplot: We see in the boxplot that the average neuron firing rate of sessions 1, 2 and 3 of Cori is significantly higher than that of Forssmann in sessions 4 and 5. This indicates that averaging all of our neurons may not be the best idea as there is clear differences. More importantly the differences are between the mice indicating a biological difference in types of neurons.
+
+
+```{r echo=FALSE, results='hide',message=FALSE}
+par(mfrow=c(1,3))
+# Main effect plot for left contrast
+plotmeans(firingrate~contrast_left,data=df,xlab="Left Contrast",ylab="Firing Rate",
+          main="Main  effect, Left Contrast",cex.lab=1.5)
+
+# Main effect plot for right contrast
+plotmeans(firingrate~contrast_right,data=df,xlab="Right Contrast",ylab="Firing Rate", 
+          main="Main  effect, Right Contrast",cex.lab=1.5)
+
+with(df, interaction.plot(x.factor = contrast_right, 
+                            trace.factor = contrast_left, 
+                            response = firingrate)
+                            )
+options(repr.plot.width=15, repr.plot.height=4)
+```
+Observations:
+  Right Contrast: We notice an overall increase in firing rate of neurons based on the increase in right contrast. This may indicate high influence of the right contrast in our firing rates and predictions.
+  Left Contrast: We also notice a somewhat less obvious though still an upward trend of firing rate based on the left contrast. 
+  Interaction Plot: The only thing we can notice in this plot is that when contrast_left = 0, there is a strictly positive trend between the right contrast and the firing rate. What can also be seen is that the bigger the difference in contrast the higher the firing rate seems to be. In further study we may see this more pronounced.
+  
+
+## Inferential Analysis
+We now look to see if the interaction of the contrasts is significant or not with a hypothesis test:
+### Model building
+Originally what we were starting out with was a mixed model effect.
+$$Y_{ijk} = \mu_{...} + \alpha_{i..} + \beta_{.j.} +(\alpha\beta)_{ij} + \eta_{..k}+\epsilon_{ijkl}$$
+
+Where 
+$\mu$ is the population mean
+$\alpha_i$ is the i-th fixed effect of left contrast
+$\beta_j$ is the j-th fixed effect of right contrast
+$(\alpha\beta)_{ij}$ is the interaction term of the contrasts
+$\epsilon_{ijkl}$ is the split-plot error which is the error term acting on the level of an individual observation.
+$\eta_k$ is the random effect variable of the k-th session
+
+#### Model Assumptions
+$\eta_{i_k}\sim(0,\sigma^2_\eta)$ and $\epsilon_{ijk}\sim(0,\sigma^2)$ and independence between $\eta_{i_k}$ and $\epsilon_{ijk}$
+
+$H_0: (\alpha\beta)_{i,j}=0$ for all combinations of i,j
+$H_A: \exists _i,_j, s.t. (\alpha\beta)_{i,j}\neq0$
+Significance level: $\alpha=0.05$
+```{r echo=FALSE, results='hide',message=FALSE}
+fit=lmer(firingrate~(1|session)+contrast_left*contrast_right, data = df)
+#reduced=lmer(firingrate~(1|session)+contrast_left+contrast_right, data = df)
+anova=anova(fit)
+fitt=lm(firingrate~contrast_left*contrast_right, data = df)
+rr=lm(firingrate~contrast_left+contrast_right, data = df)
+anovalmer=anova(fit)
+anova1=anova(fit,fitt)
+anova2=anova(fit, rr)
+anova3=anova(rr, fitt)
+```
+Result: We run tests on whether the interaction term is significant on both a mixed effects and a fixed effects model. We get all of our p values to be less than $\alpha$ = 0.05 therefore a random effect as well as the interaction term of contrasts is significant at this given significance level. However, we can note that if we had chosen a smaller $\alpha$ the interaction term in the mixed effects which was `r round(anovalmer[3,6],3)` would not be considered significant. This is the alpha level we were comfortable with but to highlight, if you choose a lower significance level you will need to use the mixed effect additive model.
+
+In conclusion we will be keeping our full model the way it is above as our final model.
+
+## Sensetivity Analysis
+```{r}
+qqnorm(resid(fit))
+qqline(resid(fit))
+
+```
+QQplot: We see the residuals falling along the qqline with a very slight heavy right tail. From this we can assume normality is a reasonable assumption.
+
+
+### Reasoning for Clustering
+***The big take away here is. Our boxplots give us a big indication as to why we choose to do a clustering analysis. We ahd originally averaged out our firing rates by neuron, trial and time segment. In doing so we are making an assumption that all neurons fire the same within all trials and time segments. This is however obviously not the case as our boxplots reveal. So what we will now do is a different version where we cluster our data by neuron to see if we can find different characteristics because maybe there is some type of difference that we can see between the two mice. One hypothesis I am thinking of is that a certain type of neuron/neurons is more present in one mouse than the other***
+
+
+# Analysis Version 2: Clustering by neuron-type
+## DataTable formation (Heirarchical clustering) and EDA
+ 
+After the results from our first part of the analysis we confirm the idea of clustering from [this NCBI article](https://pubmed.ncbi.nlm.nih.gov/28521139/) which hinted at the significance of different cell types exhibiting type-specific dynamics in activity.
+
+In this variation of the analysis we will be attempting to retain individual neurons and firing times in order to cluster our neurons into different subsets and then analyze as we did above on each separate subset. Due to the previous analysis, we saw differences in firerates of mice. Thus normalization between sessions will be implemented to account for this when we cluster. Based on biological concepts, we expect to see 3-4 different types of neurons. [Accoring to this guide](https://www.cliffsnotes.com/study-guides/biology/biology/nervous-coordination/animal-nerve-cells#:~:text=There%20are%20three%20types%20of,%2C%20interneurons%2C%20and%20motor%20neurons.) We are okay with collapsing by trials and time for now because clustering by firing rate by average trial should help us partition the neurons. If we had added by trial and time the result would be too convoluted for analysis. Also we cannot assume that the same neuron would fire the same within each given trial so an averaging by trial makes sense.
+
+#### Benefits of Clustering
+Retaining neuron info: By not collapsing neurons by trial, we are able to retain individual neuron activity which can give us some information that could differentiate them by firing rate.
+
+```{r}
+#This part of the code will remove the neurons that on average fire less than once per second as we deem those neurons to be too inactive.
+
+#We first will average firing rate per neuron per trial
+avg_by_trial=list()
+avg_by_trial2=list()
+n.trials=list()
+temp=list()
+neuron_firerate=list()
+neuron_firerate2=list()
+t=0.4
+session2=session
+df2=data.frame()
+threshold=0.5
+for (i in 1:5){
+  #We create a 2d array based on neuron and time for session 1 where we add all trials together. For example in session 1, we will use the Reduce() function to add all 214 spike matrices and divide them by 214 and by 0.4 to get the average firing rate of a neuron per trial per second
+  
+#We will use a threshold of 0.1 so that we can see whether there are some neurons that fire. Neurons that fire rarely may have some useful knowledge whereas neurons that don't fire at all do not.
+  n.trials[[i]]=length(session[[i]]$spks) #214
+  avg_by_trial[[i]] = Reduce('+',session[[i]]$spks)/n.trials[[i]]/t #178x39
+  neuron_firerate[[i]] = rowSums(avg_by_trial[[i]]) #178
+  #average neuron fire rate per trial per second
+    for(j in 1:n.trials[[i]]){ #loop 1 to 214
+      session2[[i]]$spks[[j]]=session[[i]]$spks[[j]][neuron_firerate[[i]]>threshold,] #neuron matrices copied for only the filtered neurons that meant the threshold
+    }
+  avg_by_trial2[[i]]=avg_by_trial[[i]][neuron_firerate[[i]]>threshold,]
+  neuron_firerate2[[i]] = rowSums(avg_by_trial2[[i]]) 
+}
+```
+
+### Histogram. Neuron firerate and setting minimum firing threshold
+Based on our histograms, we had first noticed that a lot of our neurons were not firing at all. This makes sense as another part of the experiment dealt with mice not reacting to stimulus for 1.5 seconds. Since it it beyond the scope of our interests, we will remove the nonactive neurons from our data. We had a threshold setup of an average fire rate of greater than 0.5 per trial which will only remove those that fire at rates we deem too low to make much out of. We also did not want to set such a high threshold that we would lose some of the data from mouse 'Forssmann' as its average firing rate is fairly low per neuron. The threshold of 0.5 seems reasonable by inspection. Even with such a lenient threshold we removed a third of our neurons.
+
+```{r}
+par(mfrow=c(2,3))
+for(i in 1:5){
+  hist(neuron_firerate[[i]], main=paste('session',i), xlab='Neuron firerate',breaks=seq(0,40,0.5), xlim = c(0,10))
+  }
+```
+
+We notice that what we then had done is also normalize our data from sessions. This is because we had noticed that the average firing rate for mouse 'Cori' is much higher than for 'Forssmann' therefore since we want to get information on neural activity, we use normalization to treat both mice as equal under the assumption that neurons should have similar mechanisms within the same species of mouse. With normalization we hope to account for the possible differences in synaptic activity due to a difference in age, health or other potential factors two mice may have. 
+
+```{r}
+c_prc=100-round(100*(dim(session2[[1]]$spks[[1]])[1]+dim(session2[[2]]$spks[[1]])[1]+dim(session2[[3]]$spks[[1]])[1])/(dim(session[[1]]$spks[[1]])[1]+dim(session[[2]]$spks[[1]])[1]+dim(session[[3]]$spks[[1]])[1]))
+f_prc=100-round(100*(dim(session2[[4]]$spks[[1]])[1]+dim(session2[[5]]$spks[[1]])[1])/(dim(session[[4]]$spks[[1]])[1]+dim(session[[5]]$spks[[1]])[1]))
+```
+
+There was some concern over whether one mouse would have a loss of a significant more neurons than the other. However upon calculation we got that `r c_prc` percent of neurons are removed from Cori and `r_prc` are removed from Forssmann. Since the values are similar we do not see a need for this concern.
+
+
+```{r}
+#We will normalize our neurons to account for the fact that our mice have different sensitivities as shown in our boxplot
+sessioncolumn=c()
+normalized_avg_trials2=list()
+df2=data.frame()
+for (ID in 1:5){
+  sessioncolumn=append(sessioncolumn,rep(ID,dim(session2[[ID]]$spks[[1]])[1]))
+  normalized_avg_trials2[[ID]]=t(scale(t(avg_by_trial2[[ID]])))
+  df2=rbind(df2, normalized_avg_trials2[[ID]])
+}
+df2=cbind(df2,sessioncolumn)
+```
+
+Next we will finally cluster our data.
+### Clustering
+
+#### Scree Plot
+```{r}
+df.hcl <- df2[,-40] %>%  dist() %>% hclust(method = "average")
+
+all <-df2[,-40]
+c <- cor(all, method="pearson")
+# To determine number of groups
+distance_sum <-c()
+for (k in 1:11){
+    branch=cutree(df.hcl,k=k)
+    group_ids <-split(rownames(df2),branch)
+    avg_matrix <-all[,c()]
+    all_avg_matrix <-all
+
+    for (group.n in 1:length(group_ids)){
+        group.idx <-which(rownames(all) %in% group_ids[[group.n]])
+        avg_exp <-colMeans(all[group.idx, ])
+        all_avg_matrix[group.idx, ] <-matrix(rep(avg_exp,length(group.idx)),nrow=length(group.idx))
+    }
+
+    distance_sum <-c(distance_sum,sum((all-all_avg_matrix)^2))
+}
+plot(1:length(distance_sum),distance_sum,type="b")
+```
+By the use of the elbow method, it looks that the total within sum of squares begins to level off after 4 clusters so we will choose our cluster number to be k=4.
+According to [this article](https://en.wikipedia.org/wiki/Visual_cortex#:~:text=The%20primary%20visual%20cortex%20is%20divided%20into%20six%20functionally%20distinct,4B%2C%204C%CE%B1%2C%20and%204C%CE%B2.) this might make sense as the layer of the visual cortex that receives the most visual input is divided into 4 layers however this is just speculation.
+
+#### Dendogram
+```{r}
+dend=as.dendrogram(df.hcl)
+#Coloring of dendrograms
+plot(color_branches(dend,k=4) )
+```
+
+Due to the noise it does bear some difficulty to see clear distinctions as k=3 could also look reasonable, however we will be confident in our scree plot as it is a more quantifiable method.
+
+```{r}
+#Add cluster info to dataframe df2
+df2$Cluster=cutree(df.hcl,k=4)
+
+#Add clusters back into original sessions
+#Create dataframes for each cluster
+for (ID in 1:5){
+  session2[[ID]]$cluster=df2$Cluster[df2$sessioncolumn==ID]
+}
+
+#Create firerate by cluster dataframe
+n.neurons=list() #initialize neuron types by cluster
+
+for(c in 1:4){
+  n.neurons[[c]]=0
+}
+for(ID in 1:5){ #create list of number of neurons by cluster
+  for(c in 1:4){
+    n.neurons[[c]]= n.neurons[[c]]+sum(session2[[ID]]$cluster==c)
+  }
+}
+
+#Create function that makes dataframes by cluster 
+cluster_dataframe= function(c) {
+df_cluster=data.frame()
+
+session_col = c()
+contrast_right = c()
+contrast_left = c()
+feedback= c()
+avg_firing_rate=c()
+ for(ID in 1:5){
+    session_col=c(session_col,rep(ID, n.trials[[ID]]))
+    contrast_left=c(contrast_left, session2[[ID]]$contrast_left)
+    contrast_right=c(contrast_right, session2[[ID]]$contrast_right)
+    feedback=c(feedback, session2[[ID]]$feedback_type)
+    
+    firingrate=numeric(n.trials[[ID]]) 
+    for(i in 1:n.trials[[ID]]){
+      firingrate[i]=sum(session[[ID]]$spks[[i]][session2[[ID]]$cluster==c,])/n.neurons[[c]]/t
+     
+    }
+    avg_firing_rate=c(avg_firing_rate,firingrate)
+    
+    
+ }
+cluster_col=rep(c,Reduce('+', n.trials))
+df_cluster=data.frame(cluster_col,session_col, contrast_left, contrast_right, avg_firing_rate, feedback)
+return(df_cluster)
+}
+
+```
+
+```{r}
+df_cluster1=cluster_dataframe(1)
+df_cluster2=cluster_dataframe(2)
+df_cluster3=cluster_dataframe(3)
+df_cluster4=cluster_dataframe(4)
+df_all=cbind(df_cluster1[,-1],df_cluster2$avg_firing_rate, df_cluster3$avg_firing_rate, df_cluster4$avg_firing_rate)
+df_all$session_col=as.factor(df_all$session_col)
+avg_fr_rate=(df_cluster1$avg_firing_rate+df_cluster2$avg_firing_rate+df_cluster3$avg_firing_rate+df_cluster4$avg_firing_rate)/4
+```
+
+#### Main effects plots and dispersion table per cluster
+```{r}
+par(mfrow=c(2,4), tcl=-0.5, omi=c(0.2,0.2,0,0))
+plotmeans(avg_firing_rate~contrast_right,data=df_cluster1,xlab="",ylab="", 
+          main="Cluster 1(R)",cex.lab=1.5,n.label=FALSE)
+par(col.axis = "transparent")
+plotmeans(avg_firing_rate~contrast_right,data=df_cluster2,xlab="",ylab="", 
+          main="Cluster 2(R)",cex.lab=1.5,n.label=FALSE)
+plotmeans(avg_firing_rate~contrast_right,data=df_cluster3,xlab="",ylab="", 
+          main="Cluster 3(R)",cex.lab=1.5,n.label=FALSE)
+plotmeans(avg_firing_rate~contrast_right,data=df_cluster4,xlab="",ylab="", 
+          main="Cluster 4(R)",cex.lab=1.5,n.label=FALSE)
+#par(mfrow=c(2,2))
+plotmeans(avg_firing_rate~contrast_left,data=df_cluster1,xlab="",ylab="", 
+          main="Cluster 1(L)",cex.lab=1.5,n.label=FALSE)
+
+plotmeans(avg_firing_rate~contrast_left,data=df_cluster2,xlab="",ylab="", 
+          main="Cluster 2(L)",cex.lab=1.5,n.label=FALSE)
+plotmeans(avg_firing_rate~contrast_left,data=df_cluster3,xlab="",ylab="", 
+          main="Cluster 3(L)",cex.lab=1.5,n.label=FALSE)
+plotmeans(avg_firing_rate~contrast_left,data=df_cluster4,xlab="",ylab="", 
+          main="Cluster 4(L)",cex.lab=1.5,n.label=FALSE)
+mtext("Contrast level", side=1, outer=T, at=0.5)
+mtext("Firing Rate", side=2, outer=T, at=0.5)
+```
+
+```{r}
+#percentage of each type of cluster per session
+clust=rbind(round((table(session2[[1]]$cluster)/length(session2[[1]]$cluster))*100),
+round((table(session2[[2]]$cluster)/length(session2[[2]]$cluster))*100),
+round((table(session2[[3]]$cluster)/length(session2[[3]]$cluster))*100),
+round((table(session2[[4]]$cluster)/length(session2[[4]]$cluster))*100),
+round((table(session2[[5]]$cluster)/length(session2[[5]]$cluster))*100))
+colnames(clust)=c('Cluster1','Cluster2','Cluster3','Cluster4')
+rownames(clust)=c('Session1','Session2','Session3','Session4','Session5')
+knitr::kable(clust, caption = "Cluster Dispersion by Session" )
+```
+
+Observations: 
+Main effects plots: What we notice from each of these effects plots is that the neurons react more to extreme contrasts values{0,1}  especially to the right contrast. 
+We may also note that the neurons behave similarly to the left contrast however clusters 1 and 2 versus clusters 3 and 4 behave slightly differently to the right contrast.
+Dispersion Table: We see that there are far more clusters 1 and 2 with a bit less of 3 and very little number of cluster 4 per session and overall. 
+
+
+#### Interactive histogram (By session)
+```{r}
+# Build dataset with different distributions
+data <- data.frame(
+  session = c(rep( '1', sum(df_all$session_col==1)),rep( '2', sum(df_all$session_col==2)),rep( '3', sum(df_all$session_col==3)),rep( '4', sum(df_all$session_col==4)),rep( '5', sum(df_all$session_col==5)) ),
+  value = c( df_all$avg_firing_rate[df_all$session_col==1], df_all$avg_firing_rate[df_all$session_col==2], df_all$avg_firing_rate[df_all$session_col==3],df_all$avg_firing_rate[df_all$session_col==4],df_all$avg_firing_rate[df_all$session_col==5] )
+)
+# Represent it
+p <- data %>%
+  ggplot( aes(x=value, fill=session)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+    scale_fill_manual(values=c("#cc0033", "#3300ff","#330066", "#000000","#66CC99")) +
+    theme_ipsum() +  ggtitle('Firing rate vs Session') + xlab('Session')+
+    labs(fill="")
+
+ggplotly(p)
+```
+Another alternative to the boxplot is this histogram above. Feel free to toggle through the different sessions and scroll over the bars. We notice that sessions 4 and 5 coming from mouse 'Forssmann' have much lower averages and more narrow range when it comes to average firing rate. We notice a bell-shaped curve for each session.
+
+
+```{r}
+#Create dataframes for each session with clusters indicated
+df_clust_sess1=rbind(df_cluster1[df_cluster1$session_col==1,],df_cluster2[df_cluster1$session_col==1,],df_cluster3[df_cluster1$session_col==1,],df_cluster4[df_cluster1$session_col==1,])
+df_clust_sess2=rbind(df_cluster1[df_cluster1$session_col==2,],df_cluster2[df_cluster1$session_col==2,],df_cluster3[df_cluster1$session_col==2,],df_cluster4[df_cluster1$session_col==2,])
+df_clust_sess3=rbind(df_cluster1[df_cluster1$session_col==3,],df_cluster2[df_cluster1$session_col==3,],df_cluster3[df_cluster1$session_col==3,],df_cluster4[df_cluster1$session_col==3,])
+df_clust_sess4=rbind(df_cluster1[df_cluster1$session_col==4,],df_cluster2[df_cluster1$session_col==4,],df_cluster3[df_cluster1$session_col==4,],df_cluster4[df_cluster1$session_col==4,])
+df_clust_sess5=rbind(df_cluster1[df_cluster1$session_col==5,],df_cluster2[df_cluster1$session_col==5,],df_cluster3[df_cluster1$session_col==5,],df_cluster4[df_cluster1$session_col==5,])
+
+#Create dataframes per mouse
+df_clust_sessCori=rbind(df_clust_sess1,df_clust_sess2,df_clust_sess3)
+df_clust_sessForssmann=rbind(df_clust_sess4,df_clust_sess5)
+
+#Create array of number of each cluster per mouse
+num_clust_mouse1=as.numeric(table(rbind(session2[[1]]$cluster,session2[[2]]$cluster,session2[[3]]$cluster)))
+num_clust_mouse2=as.numeric(table(rbind(session2[[4]]$cluster,session2[[5]]$cluster)))
+```
+
+#### Histogram: Clusters for each mouse
+```{r}
+
+n=paste('n1 =',num_clust_mouse1[1],'n2 =',num_clust_mouse1[2],'n3 =',num_clust_mouse1[3],'n4 =',num_clust_mouse1[4])
+
+# Build dataset for 
+data3 <- data.frame(
+  cluster_type = c(rep( '1', length(df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==1])),rep( '2', length(df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==2])),rep( '3', length(df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==3])),rep( '4', length(df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==4])) ),
+  value = c( df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==1],df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==2], df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==3], df_clust_sessCori$avg_firing_rate[df_clust_sessCori$cluster_col==4])
+)
+# Represent it
+p3 <- data3 %>%
+  ggplot( aes(x=value, fill=cluster_type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+    scale_fill_manual(values=c("#000000","#cc0033","#66CC99" ,"#3300ff","#330066")) +
+    theme_ipsum() +  ggtitle('Mouse Cori firing rates by cluster') + xlab(n)+
+    labs(fill="") +xlim(0, 7)+ylim(0,150)
+
+#ggplotly(p3)
+
+n2=paste('n1 =',num_clust_mouse2[1],'n2 =',num_clust_mouse2[2],'n3 =',num_clust_mouse2[3],'n4 =',num_clust_mouse2[4])
+
+# Build dataset for 
+data4 <- data.frame(
+  cluster_type = c(rep( '1', length(df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==1])),rep( '2', length(df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==2])),rep( '3', length(df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==3])),rep( '4', length(df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==4])) ),
+  value = c( df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==1],df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==2], df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==3], df_clust_sessForssmann$avg_firing_rate[df_clust_sessForssmann$cluster_col==4])
+)
+# Represent it
+p4 <- data4 %>%
+  ggplot( aes(x=value, fill=cluster_type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+    scale_fill_manual(values=c("#000000","#cc0033","#66CC99" ,"#3300ff","#330066")) +
+    theme_ipsum() +  ggtitle('Mouses: Cori(Left) vs Forssmann(Right) firing rates by cluster') + xlab(n2)+
+    labs(fill="")+ylim(0,150)
+
+subplot(p3, p4)
+```
+All clusters are firing at a much higher average for Cori than for Forssmann.
+Cluster 1: Forssmann has a more narrow range than Cori and much smaller count. 
+Cluster 2:  Forssmann's cluster 2 is very close to 0, begging us to wonder if our threshold had removed mainly type 2 neurons.
+Cluster 3: Very similar distribution, disregarding firing rate values.
+Cluster 4: Cori has a U Shaped distribution whereas Forssmann has a descending distribution.
+Mouse Cori's most active cluster is 3 vs Forssmann's most active cluster is 1.
+Next, we would like to see how the count size differs by ratio
+
+### Pi chart: Ratio of neurons per mouse
+```{r}
+par(mfrow=c(1,2))
+# Pie Chart with Percentages for Cori
+slices <- num_clust_mouse1
+lbls <- c("C1", "C2", "C3", "C4")
+pct <- round(slices/sum(slices)*100)
+lbls <- paste(lbls, pct) # add percents to labels
+lbls <- paste(lbls,"%",sep="") # ad % to labels
+pie(slices,labels = lbls,col= c("#e9ecef","#339fff","#e9ecef","#e9ecef"),
+   main="Cluster distribution: Cori")
+# Pie Chart with Percentages for Forssmann
+slices <- num_clust_mouse2
+lbls <- c("C1", "C2", "C3", "C4")
+pct <- round(slices/sum(slices)*100)
+lbls <- paste(lbls, pct) # add percents to labels
+lbls <- paste(lbls,"%",sep="") # ad % to labels
+pie(slices,labels = lbls,col= c("#e9ecef","#339fff","#e9ecef","#e9ecef"),
+  main="Cluster distribution: Forssmann")
+
+```
+
+
+We notice Cori has a lot more cluster 2 neurons than Forssmann and a bit less of cluster 1. Cluster's 4 and 5 seem to be roughly the same.
+Unfortunatley we do not have the biological background to understand what type of cluster is 1 and 2 though a further study may yield interesting results.
+
+#### Dispersion table by Summed Firing Rates vs Contrasts
+```{r}
+#ctbl1=matrix(xtabs(avg_firing_rate ~ contrast_left + contrast_right, data=df_cluster1),nrow=4 ,ncol=4)
+#ctbl2=matrix(xtabs(avg_firing_rate ~ contrast_left + contrast_right, data=df_cluster2),nrow=4 ,ncol=4)
+#ctbl3=matrix(xtabs(avg_firing_rate ~ contrast_left + contrast_right, data=df_cluster3),nrow=4 ,ncol=4)
+#ctbl4=matrix(xtabs(avg_firing_rate ~ contrast_left + contrast_right, data=df_cluster4),nrow=4 ,ncol=4)
+ctblt=matrix(rank((xtabs(avg_firing_rate~contrast_left + contrast_right, data=df_all)/(xtabs(~contrast_left + contrast_right, data=df_all)))), ncol=4)
+colnames(ctblt)=c("R0.0","R0.25","R0.5","R1.0")
+rownames(ctblt)=c("L0.0","L0.25","L0.5","L1.0")
+knitr::kable((ctblt),caption="Ranking Aggregating avg. firing rates by contrasts")
+```
+
+The table above was created by averaging the firing rates of each contrast combination by their number of occurrences and put those values in a ranking system.
+Observations: What we notice here is that higher contrasts are greatly favored when there is a big difference between contrasts. Ex(L=1 R=0) followed by a large overall contrast.
+#### Dispersion table by Summed Feedback vs Contrasts
+```{r}
+#Feedback ranking
+f_mat=matrix(rank(xtabs(feedback~contrast_left + contrast_right, data=df_all)/xtabs(~contrast_left + contrast_right, data=df_all)),ncol=4)
+colnames(f_mat)=c("R0.0","R0.25","R0.5","R1.0")
+rownames(f_mat)=c("L0.0","L0.25","L0.5","L1.0")
+knitr::kable(f_mat, caption="Ranking Aggregating Feedback by contrasts")
+```
+Above what we created was similar to our ranking for firing rates however here we have done it by aggregating our feedback responses divided them by their respective contrast level occurrences and ranked the results.
+Observations: We notice a big difference from the rank table of firing rates. Here we see that there were higher success rates when contrast levels were very different from eachother, and a significantly lower success rate when contrast were roughly of the same value. We assume this to be the case because it is easier to distinguish left and right contrasts when levels are different from eachother. 
+Disclaimer: We see that contrasts(0,0) had a fairly high ranking. We would like to take into account that in this experiment there was also another experiment being run on a success if the mouse acted accordingly whewn there was no contrast for 1.5 seconds. More than likely that is why such a high ranking was observed for (L0,R0) and think it should be ignored in this table.
+
+
+## Inferential analysis 
+###Removal of random term
+We were originally fitting a mixed effects model however as we discussed before, the randomness did not make sense in this case. We only have 2 mice that we are working with therefore using an accurate random intercept is not something we are comfortable with. We also assume that sessions coming from the same mouse are not random because of the fact that we assume neurons belonging to the same mouse's brain will not differ that much from eachother.
+
+Therefore here we will be working with a fixed effects model.
+
+### Model building
+$$Y_{ijk} = \mu_{...} + \eta_k+ \alpha_{i..} + \beta_{.j.} + (\alpha\beta)_{ij} +\epsilon_{ijk}$$
+
+We now look to see if the interaction of the contrasts is significant or not with a hypothesis test:
+Where 
+$\mu$ is the population mean
+$\alpha_i$ is the i-th fixed effect of left contrast
+$\beta_j$ is the j-th fixed effect of right contrast
+$(\alpha\beta)_{ij}$ is the interaction term of the contrasts
+$\epsilon_{ijkl}$ is the split-plot error which is the error term acting on the level of an individual observation.
+$\eta_k$ is the random effect variable of the k-th session
+
+Assumption
+$\epsilon_{ijk}\sim(0,\sigma^2)$
+
+$H_0: (\alpha\beta)_{i,j}=0$ for all combinations of i,j
+$H_A: \exists _i,_j, s.t. (\alpha\beta)_{i,j}\neq0$
+Significance level: $\alpha=0.05$
+
+```{r}
+fitr1=lmer(avg_firing_rate~(1|session_col)+contrast_left*contrast_right, data = df_cluster1)
+fitr2=lmer(avg_firing_rate~(1|session_col)+contrast_left*contrast_right, data = df_cluster2)
+fitr3=lmer(avg_firing_rate~(1|session_col)+contrast_left*contrast_right, data = df_cluster3)
+fitr4=lmer(avg_firing_rate~(1|session_col)+contrast_left*contrast_right, data = df_cluster4)
+
+fit1=lm(avg_firing_rate~contrast_left*contrast_right, data = df_cluster1)
+fit2=lm(avg_firing_rate~contrast_left*contrast_right, data = df_cluster2)
+fit3=lm(avg_firing_rate~contrast_left*contrast_right, data = df_cluster3)
+fit4=lm(avg_firing_rate~contrast_left*contrast_right, data = df_cluster4)
+
+afr1f1=anova(fitr1, fit1)$`Pr(>Chisq)`
+afr1f1[2]
+```
+We attempt to do away with our random effect term however upon our test when fitting a mixed effects model with a fixed effects model we notice that our p value is `r afr1f1[0]` which gives us a strong indication to reject the null hypothesis for each cluster and keep our random effects term. We had originally hoped to do away with the randomness term and create a fixed effect for simplicity however that will result in a less accurate model.
+
+```{r}
+a_fr1=anova(fitr1)
+a_fr2=anova(fitr2)
+a_fr3=anova(fitr3)
+a_fr4=anova(fitr4)
+```
+
+When testing for the significance of our interection term in each cluster we come to an interesting finding. 3 of our clusters find the interaction term to be insignificant however, our second cluster finds our interaction term to be significant at a p-value of `r a_fr2[3,6]`. Therefore for clusters 1, 3 and 4 we get an additive mixed effects model whereas for cluster 2 it will be a mixed effects full mode. 
+
+
+## Sensetivity Analysis
+```{r}
+par(mfrow=c(2,2))
+qqnorm(resid(fitr1), main = "Cluster 1")
+qqline(resid(fitr1))
+qqnorm(resid(fitr2), main = "Cluster 2")
+qqline(resid(fitr2))
+qqnorm(resid(fitr3), main = "Cluster 3")
+qqline(resid(fitr3))
+qqnorm(resid(fitr4), main = "Cluster 4")
+qqline(resid(fitr4))
+
+```
+
+Normality seems to hold for cluster 1 however for cluster 2, 3, and 4 we see a violation. However we would also like to take note of the fact that we have a much larger number of clusters 1 and 2 therefore by following CLT, it may be possible that is what accounts for the differences we see above. Notice how the smaller the number per cluster, the less normal the plot appears.
+
+## Predictive modeling
+We will aim to predict whether a mouse responds correctly or not based on the combination of contrast stimuli as well as the mean firing rate 
+
+We chose to have all of our terms be continuous instead of categorical because otherwise we would have too many coefficients which would render our model uninterpretable. 
+$$Logit (p_i(y) = \beta_0+(\beta_1X_1+\beta_2X_2 + \beta_3X_3 + \beta_4X_4)+\beta_5X_5 + \beta_6X_6 + \beta_7X_5X_6$$
+
+```{r echo=FALSE,results='hide',message=FALSE}
+df_all$feedback[df_all$feedback==-1] = 0
+#Remove the first 100 observations
+df_all2=df_all[-(1:100),]
+mylogit = glm(feedback ~ avg_firing_rate+`df_cluster2$avg_firing_rate`+`df_cluster3$avg_firing_rate`+`df_cluster4$avg_firing_rate` + contrast_left+contrast_right, data = df_all2, family = "binomial")
+
+#https://stats.oarc.ucla.edu/r/dae/logit-regression/
+
+
+pred = predict(mylogit, newx = df_all2[,-5], type='response')
+prediction=prediction(pred,df_all2[,5])
+perf = performance(prediction, measure = "tpr", x.measure = "fpr")
+
+# Draw the ROC curve
+plot(perf, main = "ROC Curve", col='red')
+lines(c(0,1), c(0,1), lty=3 )
+```
+```{r}
+# Calculate the AUC
+pp=round(performance(prediction, "auc")@y.values[[1]],4)
+```
+
+We achieve a performance of `r pp` based on our ROC Curve which gives us better odds than a 50/50 chance however it is still not that high of a performance value.
+
+```{r}
+cutpoints=data.frame(cut=perf@alpha.values[[1]], fpr=perf@x.values[[1]], 
+                      tpr=perf@y.values[[1]])
+
+cutpoint=cutpoints[cutpoints$cut==cutpoints$cut[680],]
+sensitivity=round(cutpoint[1,3],3)
+specificity=round(1-cutpoint[1,2],3)
+```
+
+We're using the decision making rule of taking the cutpoint to be where we get a fairly high specificity and highest ratio between our FPR and TPR. Given the ROC Curve as well as the FPR and TPR ratio's I'd choose the cutpoint of `r cutpoint[1,1]` with a sensetivity being `r sensitivity` and specificity being `r specificity`. Though this is not the highest values we would like for our sensetivity, we have the same FPR as by chance but we do get a sensitivity that is a decent value. This is the best we can do with this prediction so it is acceptable here.
+
+## Discussion: 
+To summarize, our study has provided some interesting insights into the neural activity and decision-making of mice. Some of these we had expected based on the background information gathered.
+  We first noticed that mice differed in their average firing rates and that there was some sensitivity to different contrast levels especially in the right contrast. It maybe the mice have a more dominant response to contrast in one side of the brain than the other. That may require a neorobiologist to comment on that. Our clustering method had resulted in the findings of 4 different clusters of neurons based on their firing rates. The difference in cluster ratio's per mouse were an interesting find. We saw that mice differed in their most active neuron type and that Cori had a much higher ratio of a specific neuron type 2 than Forssmann. Though beyond the scope of this project as we do not have the data, the history of each mouse may give some neurobiological insight for this difference.
+  Secondly, neuron firing seems to be sensetive to higher contrast rates of either left or right or both contrasts, which makes sense as optical nerve sensetivity would be more affected by a bigger distortion of light.    There was also confirmation on feedback percentage based on contrast. It was observed that mice picked the right decisions when there was a stark difference in contrasts where as they were significantly lower when contrasts were of equal value. This would make sense as it is easy to separate right and left if the light distorions between the two are drastic.
+  In all our analysis has confirmed what the background information has provided. What may be of use to try in future projects would be to analyze the feedback percentage of each mouse to see if one is more correct than the other. Mouse history aside, a difference may show a significance in cognitive ability based on neuron type 2.
+
+# Acknowledgements {-}
+
+Metholodies of how to tackle data structures, grouping methods and assumptions were discussed by Professor Chen, Matthew Chen(no relation), and Jasper Tsai.
+
+
+# Reference {-}
+
+Steinmetz, N.A., Zatka-Haas, P., Carandini, M. et al. Distributed coding of choice, action and engagement across the mouse brain. Nature 576, 266–273 (2019). https://doi.org/10.1038/s41586-019-1787-x
+
+Allen WE;Kauvar IV;Chen MZ;Richman EB;Yang SJ;Chan K;Gradinaru V;Deverman BE;Luo L;Deisseroth K; (2017, May 17). Global representations of goal-directed behavior in distinct cell types of mouse neocortex. Neuron. Retrieved February 18, 2023, from https://pubmed.ncbi.nlm.nih.gov/28521139/ 
+
+Google. (n.d.). Imbalanced data | machine learning | google developers. Google. Retrieved February 10, 2023, from https://developers.google.com/machine-learning/data-prep/construct/sampling-splitting/imbalanced-data
+
+Animal Nerve Cells. CliffsNotes. (n.d.). Retrieved March 4, 2023, from https://www.cliffsnotes.com/study-guides/biology/biology/nervous-coordination/animal-nerve-cells#:~:text=There%20are%20three%20types%20of,%2C%20interneurons%2C%20and%20motor%20neurons. 
+
+Wikimedia Foundation. (2023, March 2). Visual cortex. Wikipedia. Retrieved March 18, 2023, from https://en.wikipedia.org/wiki/Visual_cortex#:~:text=The%20primary%20visual%20cortex%20is%20divided%20into%20six%20functionally%20distinct,4B%2C%204C%CE%B1%2C%20and%204C%CE%B2. 
+
+***************************************************************************
+
+
+All clusters exhibit similar reaction to contrast differences. 
+
